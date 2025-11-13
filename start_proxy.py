@@ -39,7 +39,7 @@ import socket
 import threading
 import argparse
 import re
-from urlparse import urlparse
+from urllib.parse import urlparse
 from collections import defaultdict
 
 from daemon import create_proxy
@@ -55,7 +55,7 @@ def parse_virtual_hosts(config_file):
     :rtype list of dict: Each dict contains 'listen'and 'server_name'.
     """
 
-    with open(config_file, 'r') as f:
+    with open(config_file, 'r', encoding='utf-8') as f:
         config_text = f.read()
 
     # Match each host block
@@ -97,7 +97,7 @@ def parse_virtual_hosts(config_file):
             routes[host] = (proxy_map.get(host,[]), dist_policy_map)
 
     for key, value in routes.items():
-        print key, value
+        print (key, value)
     return routes
 
 
