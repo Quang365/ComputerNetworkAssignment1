@@ -90,8 +90,88 @@ def run_backend(ip, port, routes):
             #        using multi-thread programming with the
             #        provided handle_client routine
             #
+     print("[Backend] New connection from {}".format(addr))
+            client_thread = threading.Thread(
+                target=handle_client,
+                args=(ip, port, conn, addr, routes)
+            )
+            client_thread.daemon = True  
+            client_thread.start()
+
     except socket.error as e:
       print("Socket error: {}".format(e))
+
+def setup_auth_routes():
+    """
+    Setup routes for authentication and protected resources
+    """
+    routes = {
+        'GET': {
+            '/': handle_main_page,
+            '/login': show_login_page
+        },
+        'POST': {
+            '/login': handle_login
+        }
+    }
+    return routes
+
+def handle_main_page(request):
+    """
+    Handle GET / - Check if user is authenticated via cookie
+    """
+    # Check for authentication cookie
+    if hasattr(request, 'cookies') and 'auth' in request.cookies:
+        if request.cookies['auth'] == 'true':
+            # User is authenticated - serve main page
+            response = Response(request)
+            # You'll need to implement serve_static_file or similar
+            return response.build_response(request)
+    
+    # Not authenticated - redirect to login or show 401
+    response = Response(request)
+    response.status_code = 401
+    return response.build_notfound()
+
+def handle_login(request):
+    """
+    Handle POST /login - Validate credentials and set cookie
+    """
+    # Parse form data from request body
+    import urllib.parse
+    if hasattr(request, 'body'):
+        body_params = urllib.parse.parse_qs(request.body)
+        username = body_params.get('username', [''])[0]
+        password = body_params.get('password', [''])[0]
+    else:
+        username = ''
+        password = ''
+    
+    # Validate credentials (hardcoded for demo)
+    if username == 'admin' and password == 'password':
+        # Login successful
+        response = Response(request)
+        response.status_code = 200
+        response.headers['Set-Cookie'] = 'auth=true; Path=/'
+        
+        # You might want to serve a success page or redirect
+        return response.build_response(request)
+    else:
+        # Login failed
+        response = Response(request)
+        response.status_code = 401
+        response.headers['Content-Type'] = 'text/html'
+        # Return error page
+        return response.build_notfound()
+
+def show_login_page(request):
+    """
+    Handle GET /login - Show login form
+    """
+    response = Response(request)
+    response.status_code = 200
+    # You'll need to serve the actual login HTML page
+    return response.build_response(request)
 
 def create_backend(ip, port, routes={}):
     """
