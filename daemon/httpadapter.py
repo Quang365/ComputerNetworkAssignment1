@@ -113,6 +113,30 @@ class HttpAdapter:
             #
             # TODO: handle for App hook here
             #
+        actual_headers = getattr(req, 'headers', {})
+    actual_body = getattr(req, 'body', '')
+    
+    # Call the hook with actual request data
+    hook_result = req.hook(headers=actual_headers, body=actual_body)
+    
+    # Handle the hook return value
+    if hook_result is not None:
+        # If hook returns a Response object, use it
+        if hasattr(hook_result, 'build_response'):
+            response = hook_result.build_response(req)
+        # If hook returns bytes, use directly
+        elif isinstance(hook_result, bytes):
+            response = hook_result
+        # If hook returns string, encode to bytes
+        elif isinstance(hook_result, str):
+            response = hook_result.encode('utf-8')
+        # If hook returns dict, convert to JSON
+        elif isinstance(hook_result, dict):
+            import json
+            json_response = json.dumps(hook_result)
+            # Build proper HTTP JSON response
+            http_response = f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {len(json_response)}\r\n\r\n{json_response}"
+            response = http_response.encode('utf-8')
 
         # Build response
         response = resp.build_response(req)
@@ -224,6 +248,15 @@ class HttpAdapter:
         # we provide dummy auth here
         #
         username, password = ("user1", "password")
+         if username and password:
+        # Encode username and password in Base64 for Basic Authentication
+        import base64
+        credentials = f"{username}:{password}"
+        encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
+        headers["Proxy-Authorization"] = f"Basic {encoded_credentials}"
+    
+    # Add other common proxy headers
+    headers["Proxy-Connection"] = "Keep-Alive"
 
         if username:
             headers["Proxy-Authorization"] = (username, password)
