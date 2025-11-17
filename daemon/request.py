@@ -110,13 +110,21 @@ class Request():
             # self.hook manipulation goes here
             # ...
             #
+		if self.hook:
+            print("[Request] hook found at {} {}".format(self.method, self.path))
 
         self.headers = self.prepare_headers(request)
         cookies = self.headers.get('cookie', '')
             #
             #  TODO: implement the cookie function here
             #        by parsing the header            #
-
+			self.cookies = CaseInsensitiveDict()
+    if cookies:
+        cookie_pairs = cookies.split(';')
+        for pair in cookie_pairs:
+            if '=' in pair:
+                key, value = pair.split('=', 1)
+                self.cookies[key.strip()] = value.strip()
         return
 
     def prepare_body(self, data, files, json=None):
@@ -125,6 +133,7 @@ class Request():
         #
         # TODO prepare the request authentication
         #
+		 self.auth = "basic"
 	# self.auth = ...
         return
 
@@ -134,6 +143,8 @@ class Request():
         #
         # TODO prepare the request authentication
         #
+		if body:
+        self.headers["Content-Length"] = str(len(body))
 	# self.auth = ...
         return
 
@@ -143,6 +154,7 @@ class Request():
         # TODO prepare the request authentication
         #
 	# self.auth = ...
+		 self.auth = auth
         return
 
     def prepare_cookies(self, cookies):

@@ -178,6 +178,26 @@ class Response():
         #        video/mpeg
         #        ...
         #
+		elif main_type == 'application':
+        if sub_type in ['xml', 'json', 'zip', 'pdf']:
+            base_dir = BASE_DIR+"static/"
+            self.headers['Content-Type'] = f'application/{sub_type}'
+        else:
+            base_dir = BASE_DIR+"apps/"
+            self.headers['Content-Type'] = f'application/{sub_type}'
+    elif main_type == 'text':
+        if sub_type in ['csv', 'xml', 'javascript']:
+            base_dir = BASE_DIR+"static/"
+            self.headers['Content-Type'] = f'text/{sub_type}'
+    elif main_type == 'video':
+        base_dir = BASE_DIR+"static/"
+        self.headers['Content-Type'] = f'video/{sub_type}'
+    elif main_type == 'audio':
+        base_dir = BASE_DIR+"static/"
+        self.headers['Content-Type'] = f'audio/{sub_type}'
+    elif main_type == 'font':
+        base_dir = BASE_DIR+"static/"
+        self.headers['Content-Type'] = f'font/{sub_type}'
         else:
             raise ValueError("Invalid MEME type: main_type={} sub_type={}".format(main_type,sub_type))
 
@@ -201,6 +221,21 @@ class Response():
             #  TODO: implement the step of fetch the object file
             #        store in the return value of content
             #
+		try:
+        # Check if file exists
+        if not os.path.exists(filepath):
+            print(f"[Response] File not found: {filepath}")
+            return 0, b""
+        
+        # Read file content
+        with open(filepath, 'rb') as file:
+            content = file.read()
+        
+        print(f"[Response] Successfully loaded {len(content)} bytes from {filepath}")
+    except Exception as e:
+        print(f"[Response] Error reading file {filepath}: {e}")
+        content = b""
+
         return len(content), content
 
 
@@ -228,6 +263,20 @@ class Response():
         #
         # TODO prepare the request authentication
         #
+		auth_header = reqhdr.get("Authorization", "")
+    if auth_header.startswith("Basic "):
+        # Extract and validate Basic Auth credentials
+        import base64
+        try:
+            encoded_credentials = auth_header[6:]  # Remove "Basic " prefix
+            decoded_credentials = base64.b64decode(encoded_credentials).decode('utf-8')
+            username, password = decoded_credentials.split(':', 1)
+            # Here you can validate credentials against your user database
+            # For now, we'll just acknowledge the authentication attempt
+            print(f"[Response] Authentication attempt: username={username}")
+        except Exception as e:
+            print(f"[Response] Auth parsing error: {e}")
+		
 	# self.auth = ...
                 "Date": "{}".format(datetime.datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT")),
                 "Max-Forward": "10",
@@ -242,9 +291,49 @@ class Response():
             #  TODO: implement the header building to create formated
             #        header from the provied headers
             #
+		 header_lines = []
+    
+    # Add status line
+    status_reason = "OK" if self.status_code == 200 else "Not Found"
+    if hasattr(self, 'status_code') and self.status_code:
+        status_reason = "OK" if self.status_code == 200 else "Not Found"
+        header_lines.append(f"HTTP/1.1 {self.status_code} {status_reason}")
+    else:
+        header_lines.append("HTTP/1.1 200 OK")
+    
+    # Add all headers
+    for key, value in headers.items():
+        if value and value != "None":  # Only add if value is not empty or "None"
+            header_lines.append(f"{key}: {value}")
+    
+    # Add empty line to separate headers from body
+    header_lines.append("")
+    header_lines.append("")
+    
+    fmt_header = "\r\n".join(header_lines)
         #
         # TODO prepare the request authentication
         #
+	# Set up authentication object for the response
+    # This can be used for session management or further auth processing
+    self.auth = {
+        'authenticated': False,
+        'username': None,
+        'auth_type': None
+    }
+    
+    # Check if we have valid authentication from the request
+    if 'Authorization' in reqhdr:
+        self.auth['auth_type'] = 'Basic'
+        # You can set authenticated to True if credentials are valid
+        # For now, we'll mark it based on presence of auth header
+        self.auth['authenticated'] = True
+        
+    # Check for session cookies for cookie-based auth
+    if 'Cookie' in reqhdr and 'auth=true' in reqhdr['Cookie']:
+        self.auth['auth_type'] = 'Cookie'
+        self.auth['authenticated'] = True
+        self.auth['username'] = 'authenticated_user'  # Extract from session if available
 	# self.auth = ...
         return str(fmt_header).encode('utf-8')
 
@@ -292,6 +381,33 @@ class Response():
         #
         # TODO: add support objects
         #
+	# Add support for JavaScript files
+	elif mime_type == 'application/javascript' or path.endswith('.js'):
+        base_dir = self.prepare_content_type(mime_type = 'application/javascript')
+    
+    # Add support for images
+    elif mime_type.startswith('image/'):
+        base_dir = self.prepare_content_type(mime_type = mime_type)
+    
+    # Add support for JSON files
+    elif mime_type == 'application/json' or path.endswith('.json'):
+        base_dir = self.prepare_content_type(mime_type = 'application/json')
+    
+    # Add support for plain text files
+    elif mime_type == 'text/plain' or path.endswith('.txt'):
+        base_dir = self.prepare_content_type(mime_type = 'text/plain')
+    
+    # Add support for PDF files
+    elif mime_type == 'application/pdf' or path.endswith('.pdf'):
+        base_dir = self.prepare_content_type(mime_type = 'application/pdf')
+    
+    # Add support for XML files
+    elif mime_type == 'application/xml' or path.endswith('.xml'):
+        base_dir = self.prepare_content_type(mime_type = 'application/xml')
+    
+    # Add support for ZIP files
+    elif mime_type == 'application/zip' or path.endswith('.zip'):
+        base_dir = self.prepare_content_type(mime_type = 'application/zip')
         else:
             return self.build_notfound()
 

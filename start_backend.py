@@ -63,4 +63,7 @@ if __name__ == "__main__":
     ip = args.server_ip
     port = args.server_port
 
+    routes = setup_auth_routes()
+    create_backend(ip, port, routes)
+    
     create_backend(ip, port)
