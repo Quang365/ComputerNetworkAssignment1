@@ -46,9 +46,10 @@ def login(headers="guest", body="anonymous"):
     :param body (str): The request body or login payload.
     """
     print ("[SampleApp] Logging in {} to {}".format(headers, body))
+    return "Login OK"
 
 
-@app.route('/hello', methods=['PUT'])
+@app.route('/hello', methods=['PUT', 'GET'])
 def hello(headers, body):
     """
     Handle greeting via PUT request.
@@ -60,6 +61,7 @@ def hello(headers, body):
     :param body (str): The request body or message payload.
     """
     print ("[SampleApp] ['PUT'] Hello in {} to {}".format(headers, body))
+    return "Hello from WebApp"
     
 
 if __name__ == "__main__":

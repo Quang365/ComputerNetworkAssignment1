@@ -18,6 +18,7 @@ This module provides a Request object to manage and persist
 request settings (cookies, auth, proxies).
 """
 from .dictionary import CaseInsensitiveDict
+import json
 
 class Request():
     """The fully mutable "class" `Request <Request>` object,
@@ -67,26 +68,49 @@ class Request():
         self.hook = None
 
     def extract_request_line(self, request):
+        # try:
+        #     lines = request.splitlines()
+        #     first_line = lines[0]
+        #     method, path, version = first_line.split()
+
+        #     if path == '/':
+        #         path = '/index.html'
+        # except Exception:
+        #     return None, None
+
+        # return method, path, version
         try:
             lines = request.splitlines()
+            if not lines: return None, None, None
+            
             first_line = lines[0]
-            method, path, version = first_line.split()
+            parts = first_line.split()
+            
+            if len(parts) == 3:
+                method, path, version = parts
+            else:
+                 return None, None, None 
+            
 
             if path == '/':
                 path = '/index.html'
         except Exception:
-            return None, None
+            return None, None, None
 
         return method, path, version
              
     def prepare_headers(self, request):
         """Prepares the given HTTP headers."""
         lines = request.split('\r\n')
+        headers = CaseInsensitiveDict()
         headers = {}
         for line in lines[1:]:
             if ': ' in line:
                 key, val = line.split(': ', 1)
                 headers[key.lower()] = val
+            elif ':' in line: 
+                 key, val = line.split(':', 1)
+                 headers[key.lower()] = val
         return headers
 
     def prepare(self, request, routes=None):
@@ -94,6 +118,7 @@ class Request():
 
         # Prepare the request line from the request header
         self.method, self.path, self.version = self.extract_request_line(request)
+        self.method = self.method.upper()
         print("[Request] {} path {} version {}".format(self.method, self.path, self.version))
 
         #
@@ -102,39 +127,46 @@ class Request():
         #
         # TODO manage the webapp hook in this mounting point
         #
+        self.headers = self.prepare_headers(request)
         
-        if not routes == {}:
-            self.routes = routes
+        self.hook = None
+        if routes:
             self.hook = routes.get((self.method, self.path))
+            if self.hook:
+                print(f"[Request] hook found for {self.method} {self.path}")
             #
             # self.hook manipulation goes here
             # ...
             #
-		if self.hook:
+        if self.hook:
             print("[Request] hook found at {} {}".format(self.method, self.path))
 
-        self.headers = self.prepare_headers(request)
-        cookies = self.headers.get('cookie', '')
             #
             #  TODO: implement the cookie function here
             #        by parsing the header            #
-			self.cookies = CaseInsensitiveDict()
-    if cookies:
-        cookie_pairs = cookies.split(';')
-        for pair in cookie_pairs:
-            if '=' in pair:
-                key, value = pair.split('=', 1)
-                self.cookies[key.strip()] = value.strip()
+        self.cookies = {}
+        cookie_header = self.headers.get("cookie")
+        if cookie_header:
+            for part in cookie_header.split(";"):
+                if "=" in part:
+                    k, v = part.strip().split("=", 1)
+                    self.cookies[k] = v
+
+        if "\r\n\r\n" in request:
+            _, body = request.split("\r\n\r\n", 1)
+            self.body = body
+        else:
+            self.body = ""
+            
         return
 
     def prepare_body(self, data, files, json=None):
         self.prepare_content_length(self.body)
-        self.body = body
+        self.body = data
         #
         # TODO prepare the request authentication
         #
-		 self.auth = "basic"
-	# self.auth = ...
+        self.auth = "basic"
         return
 
 
@@ -143,9 +175,8 @@ class Request():
         #
         # TODO prepare the request authentication
         #
-		if body:
-        self.headers["Content-Length"] = str(len(body))
-	# self.auth = ...
+        if body:
+            self.headers["Content-Length"] = str(len(body))
         return
 
 
@@ -153,9 +184,15 @@ class Request():
         #
         # TODO prepare the request authentication
         #
-	# self.auth = ...
-		 self.auth = auth
+        self.auth = auth
         return
 
     def prepare_cookies(self, cookies):
-            self.headers["Cookie"] = cookies
+        if not cookies:
+            return
+
+        cookie_pairs = cookies.split(';')
+        for pair in cookie_pairs:
+            if '=' in pair:
+                key, value = pair.strip().split('=', 1)
+                self.cookies[key] = value
