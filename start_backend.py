@@ -26,6 +26,7 @@ import socket
 import argparse
 
 from daemon import create_backend
+from daemon.backend import setup_auth_routes
 
 # Default port number used if none is specified via command-line arguments.
 PORT = 9000 
@@ -65,5 +66,3 @@ if __name__ == "__main__":
 
     routes = setup_auth_routes()
     create_backend(ip, port, routes)
-    
-    create_backend(ip, port)

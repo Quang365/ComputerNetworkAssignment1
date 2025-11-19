@@ -23,6 +23,9 @@ Request and Response objects to handle client-server communication.
 from .request import Request
 from .response import Response
 from .dictionary import CaseInsensitiveDict
+import base64
+import socket
+import json
 
 class HttpAdapter:
     """
@@ -80,6 +83,27 @@ class HttpAdapter:
         #: Response
         self.response = Response()
 
+    def _read_full_request(self, conn):
+        """Helper to read the entire HTTP request from the socket safely."""
+        conn.settimeout(3.0) 
+        msg = b""
+        
+        while True:
+            try:
+                chunk = conn.recv(4096)
+                if not chunk:
+                    break
+                msg += chunk
+                # Dừng lại khi kết thúc Header
+                if b'\r\n\r\n' in msg:
+                    return msg.decode('utf-8', errors='ignore')
+            except socket.timeout:
+                break
+            except Exception:
+                break
+        
+        return msg.decode('utf-8', errors='ignore') if msg else None
+
     def handle_client(self, conn, addr, routes):
         """
         Handle an incoming client connection.
@@ -103,45 +127,103 @@ class HttpAdapter:
         resp = self.response
 
         # Handle the request
-        msg = conn.recv(1024).decode()
-        req.prepare(msg, routes)
+        msg_decoded = self._read_full_request(conn)
+        if not msg_decoded:
+            conn.close()
+            return
+            
+        req.prepare(msg_decoded, routes)
 
-        # Handle request hook
-        if req.hook:
-            print("[HttpAdapter] hook in route-path METHOD {} PATH {}".format(req.hook._route_path,req.hook._route_methods))
-            req.hook(headers = "bksysnet",body = "get in touch")
-            #
-            # TODO: handle for App hook here
-            #
-        actual_headers = getattr(req, 'headers', {})
-    actual_body = getattr(req, 'body', '')
-    
-    # Call the hook with actual request data
-    hook_result = req.hook(headers=actual_headers, body=actual_body)
-    
-    # Handle the hook return value
-    if hook_result is not None:
-        # If hook returns a Response object, use it
-        if hasattr(hook_result, 'build_response'):
-            response = hook_result.build_response(req)
-        # If hook returns bytes, use directly
-        elif isinstance(hook_result, bytes):
-            response = hook_result
-        # If hook returns string, encode to bytes
-        elif isinstance(hook_result, str):
-            response = hook_result.encode('utf-8')
-        # If hook returns dict, convert to JSON
-        elif isinstance(hook_result, dict):
-            import json
-            json_response = json.dumps(hook_result)
-            # Build proper HTTP JSON response
-            http_response = f"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {len(json_response)}\r\n\r\n{json_response}"
-            response = http_response.encode('utf-8')
+         # DEBUG LOGGING
+        print(f"\n[HTTP Adapter] --- Request from {addr} ---")
+        print(f"Method: {req.method}, Path: {req.path}")
+        print("Headers:", dict(req.headers))
+        print("Body:", req.body)
+        print("----------------------------------\n")
 
-        # Build response
-        response = resp.build_response(req)
+        if routes and req.method in routes and req.path in routes[req.method]:
+            print(f"[Router] Using backend handler for {req.method} {req.path}")
+            
+            handler = routes[req.method][req.path]
 
-        #print(response)
+            # Handler trả về response bytes
+            response = handler(req)
+
+            conn.sendall(response)
+            conn.close()
+            return
+        
+        response_data = None 
+        resp.request = req
+        resp.status_code = None 
+
+        if req.method == 'POST' and req.path == '/login':
+            body_str = req.body if req.body else ""
+            username, password = None, None
+            
+            # Giả lập parse credentials
+            try:
+                data = json.loads(body_str) 
+                username = data.get('username')
+                password = data.get('password')
+            except Exception:
+                if "username=admin" in body_str and "password=password" in body_str:
+                    username = "admin"
+                    password = "password"
+
+            if username == "admin" and password == "password":
+                resp.set_header("Set-Cookie", "auth=true; Path=/; HttpOnly")
+                resp.status_code = 200
+                response_data = "<html><h1>Login Success! Welcome back, Admin.</h1></html>"
+                print("[Backend] Login Success.")
+            else:
+                resp.status_code = 401
+                response_data = "401 Unauthorized - Invalid Credentials"
+                print("[Backend] Login Failed.")
+                
+        elif req.method == 'GET' and (req.path == '/index.html' or req.path == '/'):
+            cookies = req.cookies 
+            if cookies.get('auth') == 'true':
+                print("[Backend] Cookie Valid - Access Granted to index.")
+                pass 
+            else:
+                resp.status_code = 401
+                response_data = "401 Unauthorized - Login Required"
+                print("[Backend] Access Denied - Cookie missing.")
+
+        # Handle request hook (Cho WebApp/WeApRous)
+        if req.hook and resp.status_code is None: 
+            print(f"[HttpAdapter] Calling WebApp hook: {req.hook.__name__}")
+            
+            actual_headers = req.headers
+            actual_body = req.body
+            
+            # Call the hook
+            hook_result = req.hook(headers=actual_headers, body=actual_body)
+
+            if hook_result is not None:
+                resp.status_code = resp.status_code if resp.status_code else 200
+                
+                if isinstance(hook_result, dict):
+                    resp.set_header("Content-Type", "application/json")
+                    response_data = json.dumps(hook_result)
+                else: 
+                    resp.set_header("Content-Type", "text/plain")
+                    response_data = str(hook_result)
+
+        if response_data is not None:
+            content_bytes = response_data.encode('utf-8') if isinstance(response_data, str) else response_data
+            
+            resp.set_header("Content-Length", str(len(content_bytes)))
+            resp.set_header("Connection", "close")
+            
+            final_header = resp.build_response_header(req)
+            response = final_header + content_bytes
+        else:
+            resp.status_code = resp.status_code if resp.status_code else 200
+            response = resp.build_response(req)
+
+
         conn.sendall(response)
         conn.close()
 
@@ -154,13 +236,17 @@ class HttpAdapter:
         :param resp: (Response) The res:class:`Response <Response>` object.
         :rtype: cookies - A dictionary of cookie key-value pairs.
         """
+        # cookies = {}
+        # for header in self.headers:
+        #     if header.startswith("Cookie:"):
+        #         cookie_str = header.split(":", 1)[1].strip()
+        #         for pair in cookie_str.split(";"):
+        #             key, value = pair.strip().split("=")
+        #             cookies[key] = value
+        # return cookies
         cookies = {}
-        for header in headers:
-            if header.startswith("Cookie:"):
-                cookie_str = header.split(":", 1)[1].strip()
-                for pair in cookie_str.split(";"):
-                    key, value = pair.strip().split("=")
-                    cookies[key] = value
+        if hasattr(req, 'cookies'):
+            return dict(req.cookies) 
         return cookies
 
     def build_response(self, req, resp):
@@ -170,26 +256,27 @@ class HttpAdapter:
         :param resp: The  response object.
         :rtype: Response
         """
-        response = Response()
+        # response = Response()
 
-        # Set encoding.
-        response.encoding = get_encoding_from_headers(response.headers)
-        response.raw = resp
-        response.reason = response.raw.reason
+        # # Set encoding.
+        # response.encoding = self.get_encoding_from_headers(response.headers)
+        # response.raw = resp
+        # response.reason = response.raw.reason
 
-        if isinstance(req.url, bytes):
-            response.url = req.url.decode("utf-8")
-        else:
-            response.url = req.url
+        # if isinstance(req.url, bytes):
+        #     response.url = req.url.decode("utf-8")
+        # else:
+        #     response.url = req.url
 
-        # Add new cookies from the server.
-        response.cookies = extract_cookies(req)
+        # # Add new cookies from the server.
+        # response.cookies = self.extract_cookies(req)
 
-        # Give the Response some context.
-        response.request = req
-        response.connection = self
+        # # Give the Response some context.
+        # response.request = req
+        # response.connection = self
 
-        return response
+        # return response
+        return resp.build_response(req)
 
     # def get_connection(self, url, proxies=None):
         # """Returns a url connection for the given URL. 
@@ -248,15 +335,14 @@ class HttpAdapter:
         # we provide dummy auth here
         #
         username, password = ("user1", "password")
-         if username and password:
+        if username and password:
         # Encode username and password in Base64 for Basic Authentication
-        import base64
-        credentials = f"{username}:{password}"
-        encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
-        headers["Proxy-Authorization"] = f"Basic {encoded_credentials}"
+            credentials = f"{username}:{password}"
+            encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
+            headers["Proxy-Authorization"] = f"Basic {encoded_credentials}"
     
-    # Add other common proxy headers
-    headers["Proxy-Connection"] = "Keep-Alive"
+        # Add other common proxy headers
+        headers["Proxy-Connection"] = "Keep-Alive"
 
         if username:
             headers["Proxy-Authorization"] = (username, password)

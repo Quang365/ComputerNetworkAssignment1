@@ -43,6 +43,7 @@ Usage Example:
 import socket
 import threading
 import argparse
+import urllib.parse
 
 from .response import *
 from .httpadapter import HttpAdapter
@@ -90,11 +91,11 @@ def run_backend(ip, port, routes):
             #        using multi-thread programming with the
             #        provided handle_client routine
             #
-     print("[Backend] New connection from {}".format(addr))
+            print("[Backend] New connection from {}".format(addr))
             client_thread = threading.Thread(
-                target=handle_client,
-                args=(ip, port, conn, addr, routes)
-            )
+                    target=handle_client,
+                    args=(ip, port, conn, addr, routes)
+                )
             client_thread.daemon = True  
             client_thread.start()
 
@@ -123,22 +124,21 @@ def handle_main_page(request):
     # Check for authentication cookie
     if hasattr(request, 'cookies') and 'auth' in request.cookies:
         if request.cookies['auth'] == 'true':
-            # User is authenticated - serve main page
             response = Response(request)
-            # You'll need to implement serve_static_file or similar
+            request.path = "/index.html"
             return response.build_response(request)
     
     # Not authenticated - redirect to login or show 401
     response = Response(request)
     response.status_code = 401
-    return response.build_notfound()
+    response.set_header("Content-Type", "text/html")
+    return b"401 Unauthorized - Login Required"
 
 def handle_login(request):
     """
     Handle POST /login - Validate credentials and set cookie
     """
     # Parse form data from request body
-    import urllib.parse
     if hasattr(request, 'body'):
         body_params = urllib.parse.parse_qs(request.body)
         username = body_params.get('username', [''])[0]
@@ -154,7 +154,7 @@ def handle_login(request):
         response.status_code = 200
         response.headers['Set-Cookie'] = 'auth=true; Path=/'
         
-        # You might want to serve a success page or redirect
+        request.path = "/index.html"
         return response.build_response(request)
     else:
         # Login failed
@@ -168,9 +168,10 @@ def show_login_page(request):
     """
     Handle GET /login - Show login form
     """
+    request.path = "/login.html"
     response = Response(request)
     response.status_code = 200
-    # You'll need to serve the actual login HTML page
+    print("[DEBUG] show_login_page() CALLED")
     return response.build_response(request)
 
 def create_backend(ip, port, routes={}):
