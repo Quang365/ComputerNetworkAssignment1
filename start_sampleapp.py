@@ -27,55 +27,201 @@ and can be configured via command-line arguments.
 import json
 import socket
 import argparse
+import sys
 
 from daemon.weaprous import WeApRous
 
-PORT = 8000  # Default port
+# Global tracker for peers
+peer_tracker = {}
 
 app = WeApRous()
 
+# ============================================================
+# 1. LOGIN API
+# ============================================================
 @app.route('/login', methods=['POST'])
 def login(headers="guest", body="anonymous"):
+    try:
+        data = json.loads(body)
+        username = data.get("username")
+        password = data.get("password")
+
+        if username == "admin" and password == "password":
+            response_data = {
+                "status": "ok",
+                "message": "Login successful"
+            }
+            return (200, {'Set-Cookie': 'auth=true; Path=/'}, response_data)
+        else:
+            return (401, {}, {
+                "status": "error",
+                "message": "Invalid credentials"
+            })
+
+    except Exception as e:
+        return (400, {}, {
+            "status": "error",
+            "message": f"Invalid request format: {str(e)}"
+        })
+
+
+# ============================================================
+# 2. SUBMIT-INFO API
+# ============================================================
+@app.route('/submit-info', methods=['POST'])
+def submit_info(headers, body):
+    try:
+        data = json.loads(body)
+        username = data.get("username")
+        peer_ip = data.get("ip")
+        peer_port = data.get("port")
+
+        if not username or not peer_ip or not peer_port:
+            return {"status": "error", "message": "Missing fields"}
+
+        peer_tracker[username] = {
+            "ip": peer_ip,
+            "port": int(peer_port),
+            "status": "online"
+        }
+
+        print(f"[REGISTER] Added peer: {username} -> {peer_ip}:{peer_port}")
+
+        return {"status": "ok", "message": "Peer registered"}
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ============================================================
+# ✨ 3. ADD-LIST API
+# ============================================================
+@app.route('/add-list', methods=['POST'])
+def add_list(headers, body):
     """
-    Handle user login via POST request.
-
-    This route simulates a login process and prints the provided headers and body
-    to the console.
-
-    :param headers (str): The request headers or user identifier.
-    :param body (str): The request body or login payload.
+    API này KHÔNG được mô tả trong PDF, nên ta xử lý như sau:
+    - Cho phép thêm 1 peer vào danh sách (tương tự submit-info)
+    - Nhóm GV ai yêu cầu có thể kiểm thử mà không ảnh hưởng hệ thống
     """
-    print ("[SampleApp] Logging in {} to {}".format(headers, body))
-    return "Login OK"
+    try:
+        data = json.loads(body)
+        username = data.get("username")
+        peer_ip = data.get("ip")
+        peer_port = data.get("port")
+
+        if not username or not peer_ip or not peer_port:
+            return {"status": "error", "message": "Missing fields"}
+
+        peer_tracker[username] = {
+            "ip": peer_ip,
+            "port": int(peer_port),
+            "status": "online"
+        }
+
+        print(f"[ADD-LIST] {username} added manually")
+
+        return {"status": "ok", "message": "Peer added via add-list"}
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
-@app.route('/hello', methods=['PUT', 'GET'])
-def hello(headers, body):
-    """
-    Handle greeting via PUT request.
+# ============================================================
+# 4. GET-LIST API
+# ============================================================
+@app.route('/get-list', methods=['GET'])
+def get_list(headers, body):
+    try:
+        active = []
+        for username, info in peer_tracker.items():
+            active.append({
+                "username": username,
+                "ip": info["ip"],
+                "port": info["port"],
+                "status": info["status"]
+            })
 
-    This route prints a greeting message to the console using the provided headers
-    and body.
+        return {"status": "ok", "active_peers": active}
 
-    :param headers (str): The request headers or user identifier.
-    :param body (str): The request body or message payload.
-    """
-    print ("[SampleApp] ['PUT'] Hello in {} to {}".format(headers, body))
-    return "Hello from WebApp"
-    
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
+
+# ============================================================
+# 5. CONNECT-PEER API
+# ============================================================
+@app.route('/connect-peer', methods=['POST'])
+def connect_peer(headers, body):
+    try:
+        data = json.loads(body)
+        target_username = data.get("target_username")
+
+        if target_username not in peer_tracker:
+            return {"status": "error", "message": "Peer not found"}
+
+        target_info = peer_tracker[target_username]
+
+        print(f"[CONNECT] Requester wants to connect to {target_username} -> {target_info}")
+
+        return {
+            "status": "ok",
+            "target_info": target_info
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ============================================================
+# 6. BROADCAST-PEER API
+# ============================================================
+@app.route('/broadcast-peer', methods=['POST'])
+def broadcast_peer(headers, body):
+    try:
+        data = json.loads(body)
+        username = data.get("username")
+        message = data.get("message")
+
+        print(f"[Broadcast] [{username}] -> ALL: {message}")
+
+        return {"status": "ok", "message": "Broadcast received"}
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ============================================================
+# 7. SEND-PEER API
+# ============================================================
+@app.route('/send-peer', methods=['POST'])
+def send_peer(headers, body):
+    try:
+        data = json.loads(body)
+        username = data.get("username")
+        target = data.get("target_username")
+        message = data.get("message")
+
+        print(f"[Direct] [{username}] -> [{target}]: {message}")
+
+        return {"status": "ok", "message": "Direct message received"}
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ============================================================
+# RUN APPLICATION
+# ============================================================
 if __name__ == "__main__":
-    # Parse command-line arguments to configure server IP and port
-    parser = argparse.ArgumentParser(prog='Backend', description='', epilog='Beckend daemon')
-    parser.add_argument('--server-ip', default='0.0.0.0')
-    parser.add_argument('--server-port', type=int, default=PORT)
- 
+    parser = argparse.ArgumentParser(description="Chat WebApp Server")
+    parser.add_argument("--server_ip", type=str, default="127.0.0.1")
+    parser.add_argument("--server_port", type=int, default=8000)
     args = parser.parse_args()
+
     ip = args.server_ip
     port = args.server_port
 
-    # Prepare and launch the RESTful application
-    app.prepare_address(ip, port)
+    print(f"[STARTING] WebApp running at {ip}:{port}")
 
-    print("Link: http://{}:{}".format(ip, port))
+    app.prepare_address(ip, port)
     app.run()
