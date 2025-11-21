@@ -18,181 +18,49 @@ This module provides a Request object to manage and persist
 request settings (cookies, auth, proxies).
 """
 from .dictionary import CaseInsensitiveDict
-import json
 
 class Request():
-    """The fully mutable "class" `Request <Request>` object,
-    containing the exact bytes that will be sent to the server.
-
-    Instances are generated from a "class" `Request <Request>` object, and
-    should not be instantiated manually; doing so may produce undesirable
-    effects.
-
-    Usage::
-
-      >>> import deamon.request
-      >>> req = request.Request()
-      ## Incoming message obtain aka. incoming_msg
-      >>> r = req.prepare(incoming_msg)
-      >>> r
-      <Request>
-    """
-    __attrs__ = [
-        "method",
-        "url",
-        "headers",
-        "body",
-        "reason",
-        "cookies",
-        "body",
-        "routes",
-        "hook",
-    ]
-
     def __init__(self):
-        #: HTTP verb to send to the server.
         self.method = None
-        #: HTTP URL to send the request to.
-        self.url = None
-        #: dictionary of HTTP headers.
-        self.headers = None
-        #: HTTP path
-        self.path = None        
-        # The cookies set used to create Cookie header
-        self.cookies = None
-        #: request body to send to the server.
-        self.body = None
-        #: Routes
-        self.routes = {}
-        #: Hook point for routed mapped-path
-        self.hook = None
-
-    def extract_request_line(self, request):
-        # try:
-        #     lines = request.splitlines()
-        #     first_line = lines[0]
-        #     method, path, version = first_line.split()
-
-        #     if path == '/':
-        #         path = '/index.html'
-        # except Exception:
-        #     return None, None
-
-        # return method, path, version
-        try:
-            lines = request.splitlines()
-            if not lines: return None, None, None
-            
-            first_line = lines[0]
-            parts = first_line.split()
-            
-            if len(parts) == 3:
-                method, path, version = parts
-            else:
-                 return None, None, None 
-            
-
-            if path == '/':
-                path = '/index.html'
-        except Exception:
-            return None, None, None
-
-        return method, path, version
-             
-    def prepare_headers(self, request):
-        """Prepares the given HTTP headers."""
-        lines = request.split('\r\n')
-        headers = CaseInsensitiveDict()
-        headers = {}
-        for line in lines[1:]:
-            if ': ' in line:
-                key, val = line.split(': ', 1)
-                headers[key.lower()] = val
-            elif ':' in line: 
-                 key, val = line.split(':', 1)
-                 headers[key.lower()] = val
-        return headers
-
-    def prepare(self, request, routes=None):
-        """Prepares the entire request with the given parameters."""
-
-        # Prepare the request line from the request header
-        self.method, self.path, self.version = self.extract_request_line(request)
-        self.method = self.method.upper()
-        print("[Request] {} path {} version {}".format(self.method, self.path, self.version))
-
-        #
-        # @bksysnet Preapring the webapp hook with WeApRous instance
-        # The default behaviour with HTTP server is empty routed
-        #
-        # TODO manage the webapp hook in this mounting point
-        #
-        self.headers = self.prepare_headers(request)
-        
-        self.hook = None
-        if routes:
-            self.hook = routes.get((self.method, self.path))
-            if self.hook:
-                print(f"[Request] hook found for {self.method} {self.path}")
-            #
-            # self.hook manipulation goes here
-            # ...
-            #
-        if self.hook:
-            print("[Request] hook found at {} {}".format(self.method, self.path))
-
-            #
-            #  TODO: implement the cookie function here
-            #        by parsing the header            #
+        self.path = None
+        self.version = None
+        self.headers = CaseInsensitiveDict()
         self.cookies = {}
-        cookie_header = self.headers.get("cookie")
-        if cookie_header:
-            for part in cookie_header.split(";"):
-                if "=" in part:
-                    k, v = part.strip().split("=", 1)
-                    self.cookies[k] = v
+        self.body = ""
+        self.hook = None
 
-        if "\r\n\r\n" in request:
-            _, body = request.split("\r\n\r\n", 1)
-            self.body = body
-        else:
-            self.body = ""
-            
-        return
-
-    def prepare_body(self, data, files, json=None):
-        self.prepare_content_length(self.body)
-        self.body = data
-        #
-        # TODO prepare the request authentication
-        #
-        self.auth = "basic"
-        return
-
-
-    def prepare_content_length(self, body):
-        self.headers["Content-Length"] = "0"
-        #
-        # TODO prepare the request authentication
-        #
-        if body:
-            self.headers["Content-Length"] = str(len(body))
-        return
-
-
-    def prepare_auth(self, auth, url=""):
-        #
-        # TODO prepare the request authentication
-        #
-        self.auth = auth
-        return
-
-    def prepare_cookies(self, cookies):
-        if not cookies:
+    def prepare(self, raw_request, routes=None):
+        if not raw_request:
             return
 
-        cookie_pairs = cookies.split(';')
-        for pair in cookie_pairs:
-            if '=' in pair:
-                key, value = pair.strip().split('=', 1)
-                self.cookies[key] = value
+        # Tách header và body
+        parts = raw_request.split('\r\n\r\n', 1)
+        header_part = parts[0]
+        self.body = parts[1] if len(parts) > 1 else ""
+
+        # Parse Request Line
+        lines = header_part.splitlines()
+        if len(lines) > 0:
+            req_line = lines[0].split()
+            if len(req_line) >= 2:
+                self.method = req_line[0].upper()
+                self.path = req_line[1]
+                if len(req_line) > 2: self.version = req_line[2]
+
+        # Parse Headers
+        for line in lines[1:]:
+            if ': ' in line:
+                k, v = line.split(': ', 1)
+                self.headers[k] = v
+
+        # Parse Cookies
+        self.parse_cookies()
+
+    def parse_cookies(self):
+        cookie_header = self.headers.get('Cookie')
+        if cookie_header:
+            items = cookie_header.split(';')
+            for item in items:
+                if '=' in item:
+                    k, v = item.strip().split('=', 1)
+                    self.cookies[k] = v
